@@ -747,11 +747,13 @@
         const showLoadedPhoto = () => {
             if (elements.couplePhoto.naturalWidth > 0) {
                 elements.photoFrame.classList.add('has-photo');
+                elements.photoFrame.classList.remove('photo-missing');
             }
         };
 
         const showPhotoPlaceholder = () => {
             elements.photoFrame.classList.remove('has-photo');
+            elements.photoFrame.classList.add('photo-missing');
         };
 
         elements.couplePhoto.addEventListener('load', showLoadedPhoto);
