@@ -1,817 +1,526 @@
-/*
- * Wedding-Invitation
- * تفاعلات الموقع كاملة: ظرف Three.js، حركات GSAP، الموسيقى، العداد، البتلات والألعاب النارية.
- */
+// ==========================================
+// 1. Three.js - 3D Envelope Setup
+// ==========================================
+let scene, camera, renderer, envelopeGroup, flap, card;
+let isEnvelopeOpen = false;
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
 
-(() => {
-    'use strict';
+function initThreeJS() {
+    const container = document.getElementById('three-container');
+    
+    // Scene
+    scene = new THREE.Scene();
+    
+    // Camera
+    camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 0, 12);
+    
+    // Renderer
+    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    container.appendChild(renderer.domElement);
 
-    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const hasGSAP = typeof window.gsap !== 'undefined';
-    const hasThree = typeof window.THREE !== 'undefined';
+    // Lighting for Luxurious Look
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+    scene.add(ambientLight);
 
-    const elements = {
-        body: document.body,
-        envelopeStage: document.getElementById('envelopeStage'),
-        envelopeCanvas: document.getElementById('envelopeCanvas'),
-        envelopeFallback: document.getElementById('envelopeFallback'),
-        envelopeHint: document.getElementById('envelopeHint'),
-        openButton: document.getElementById('openInvitationButton'),
-        invitationContent: document.getElementById('invitationContent'),
-        sparkleField: document.getElementById('sparkleField'),
-        petalField: document.getElementById('petalField'),
-        musicButton: document.getElementById('musicButton'),
-        musicAudio: document.getElementById('weddingAudio'),
-        audioFileInput: document.getElementById('audioFileInput'),
-        audioStatus: document.getElementById('audioStatus'),
-        fireworksSection: document.getElementById('fireworksSection'),
-        fireworksCanvas: document.getElementById('fireworksCanvas'),
-        countdownNote: document.getElementById('countdownNote')
-    };
+    const dirLight1 = new THREE.DirectionalLight(0xfff0d4, 1); // Warm Gold
+    dirLight1.position.set(5, 5, 5);
+    scene.add(dirLight1);
 
-    let invitationOpened = false;
-    let selectedAudioUrl = null;
-    let threeScene = null;
-    let fireworksStarted = false;
+    const dirLight2 = new THREE.DirectionalLight(0xffffff, 0.5); // Cool White
+    dirLight2.position.set(-5, -5, 5);
+    scene.add(dirLight2);
 
-    /*
-     * التاريخ مضبوط على 14 أغسطس 2026، وهو يوم جمعة.
-     * يمكن تغيير التاريخ بسهولة من هذا السطر إذا كانت الدعوة لسنة أخرى.
-     */
-    const WEDDING_DATE = new Date('2026-08-14T00:00:00+03:00').getTime();
+    // Envelope Group
+    envelopeGroup = new THREE.Group();
+    scene.add(envelopeGroup);
 
-    const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+    // Materials
+    const whiteMat = new THREE.MeshStandardMaterial({ 
+        color: 0xffffff, 
+        roughness: 0.3, 
+        metalness: 0.1,
+        side: THREE.DoubleSide 
+    });
+    
+    const goldMat = new THREE.MeshStandardMaterial({ 
+        color: 0xD4AF37, 
+        roughness: 0.2, 
+        metalness: 0.8,
+        side: THREE.DoubleSide 
+    });
 
-    function animate(target, vars) {
-        if (hasGSAP) {
-            return window.gsap.to(target, vars);
+    // Envelope Back
+    const backGeo = new THREE.PlaneGeometry(6, 4);
+    const back = new THREE.Mesh(backGeo, whiteMat);
+    back.position.z = -0.1;
+    envelopeGroup.add(back);
+
+    // Envelope Front
+    const frontGeo = new THREE.PlaneGeometry(6, 4);
+    const front = new THREE.Mesh(frontGeo, whiteMat);
+    front.position.z = 0.1;
+    envelopeGroup.add(front);
+
+    // Envelope Flap (Triangle)
+    const flapShape = new THREE.Shape();
+    flapShape.moveTo(-3, 0);
+    flapShape.lineTo(3, 0);
+    flapShape.lineTo(0, -2.5);
+    flapShape.lineTo(-3, 0);
+    
+    const flapGeo = new THREE.ShapeGeometry(flapShape);
+    // Shift geometry so the top edge (Y=0) becomes the pivot point
+    flapGeo.translate(0, 1.25, 0); 
+    
+    flap = new THREE.Mesh(flapGeo, goldMat);
+    flap.position.set(0, 2, 0.15); // Position at top of envelope
+    envelopeGroup.add(flap);
+
+    // Invitation Card (Inside)
+    const cardGeo = new THREE.PlaneGeometry(5.5, 3.5);
+    const cardMat = new THREE.MeshStandardMaterial({ 
+        color: 0xFFDF73, // Soft Gold/White
+        roughness: 0.4, 
+        metalness: 0.3,
+        side: THREE.DoubleSide 
+    });
+    card = new THREE.Mesh(cardGeo, cardMat);
+    card.position.set(0, -0.5, 0); // Start inside the envelope
+    envelopeGroup.add(card);
+
+    // Add a subtle rotation to the envelope for 3D effect
+    envelopeGroup.rotation.x = 0.1;
+    envelopeGroup.rotation.y = -0.1;
+
+    // Event Listeners
+    window.addEventListener('resize', onWindowResize);
+    renderer.domElement.addEventListener('click', onMouseClick);
+    renderer.domElement.addEventListener('touchstart', onTouchStart, { passive: false });
+
+    animate();
+}
+
+function onWindowResize() {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+function getMouseCoords(event) {
+    const x = (event.clientX / window.innerWidth) * 2 - 1;
+    const y = -(event.clientY / window.innerHeight) * 2 + 1;
+    mouse.set(x, y);
+}
+
+function onMouseClick(event) {
+    if (isEnvelopeOpen) return;
+    getMouseCoords(event);
+    checkIntersection();
+}
+
+function onTouchStart(event) {
+    if (isEnvelopeOpen) return;
+    if (event.touches.length > 0) {
+        const touch = event.touches[0];
+        const x = (touch.clientX / window.innerWidth) * 2 - 1;
+        const y = -(touch.clientY / window.innerHeight) * 2 + 1;
+        mouse.set(x, y);
+        checkIntersection();
+    }
+}
+
+function checkIntersection() {
+    raycaster.setFromCamera(mouse, camera);
+    const intersects = raycaster.intersectObjects(envelopeGroup.children);
+    
+    if (intersects.length > 0) {
+        openEnvelope();
+    }
+}
+
+function openEnvelope() {
+    isEnvelopeOpen = true;
+    document.getElementById('click-hint').style.display = 'none';
+
+    // Play music automatically when envelope opens
+    const audio = document.getElementById('bg-music');
+    const btn = document.getElementById('music-toggle');
+    const playIcon = document.getElementById('play-icon');
+    const pauseIcon = document.getElementById('pause-icon');
+    
+    audio.play().then(() => {
+        playIcon.style.display = 'none';
+        pauseIcon.style.display = 'block';
+        btn.classList.add('playing');
+    }).catch(e => console.log("Audio autoplay prevented:", e));
+
+    // GSAP Cinematic Animation
+    const tl = gsap.timeline();
+
+    // 1. Open Flap
+    tl.to(flap.rotation, {
+        x: -Math.PI,
+        duration: 1.5,
+        ease: "power2.inOut"
+    });
+
+    // 2. Slide Card Out
+    tl.to(card.position, {
+        y: 4,
+        z: 2,
+        duration: 2,
+        ease: "power3.out"
+    }, "-=0.5");
+
+    // 3. Move Camera back slightly and fade out 3D scene
+    tl.to(camera.position, {
+        z: 15,
+        duration: 2,
+        ease: "power1.inOut"
+    }, "-=1.5");
+
+    tl.to('#three-container', {
+        opacity: 0,
+        duration: 1.5,
+        ease: "power2.in",
+        onComplete: () => {
+            document.getElementById('three-container').style.pointerEvents = 'none';
         }
+    }, "-=1");
 
-        const duration = Math.max((vars.duration || 0.5) * 1000, 0);
-        const delay = Math.max((vars.delay || 0) * 1000, 0);
-        window.setTimeout(() => {
-            Object.entries(vars).forEach(([property, value]) => {
-                if (!['duration', 'delay', 'ease', 'onComplete', 'repeat', 'yoyo', 'repeatDelay'].includes(property)) {
-                    if (target && target.style && typeof value === 'string') {
-                        target.style[property] = value;
-                    }
-                }
-            });
-            if (typeof vars.onComplete === 'function') {
-                vars.onComplete();
-            }
-        }, delay + duration);
-        return null;
+    // 4. Reveal Main Content
+    tl.to('#main-content', {
+        opacity: 1,
+        visibility: 'visible',
+        duration: 1.5,
+        ease: "power2.out"
+    }, "-=1");
+    
+    // Animate cards appearing one by one
+    tl.from('.glass-card', {
+        y: 50,
+        opacity: 0,
+        duration: 1,
+        stagger: 0.2,
+        ease: "power2.out"
+    }, "-=1");
+}
+
+function animate() {
+    requestAnimationFrame(animate);
+    
+    // Subtle floating effect for the envelope before opening
+    if (!isEnvelopeOpen) {
+        envelopeGroup.position.y = Math.sin(Date.now() * 0.001) * 0.2;
+        envelopeGroup.rotation.y = -0.1 + Math.sin(Date.now() * 0.0005) * 0.05;
     }
 
-    function setInitialAnimations() {
-        if (!hasGSAP || prefersReducedMotion) {
-            return;
-        }
+    renderer.render(scene, camera);
+}
 
-        window.gsap.from('.topbar', {
-            y: -22,
-            opacity: 0,
-            duration: 1,
-            ease: 'power3.out'
-        });
+// ==========================================
+// 2. Particles (Roses & Sparkles)
+// ==========================================
+const particlesCanvas = document.getElementById('particles-canvas');
+const pCtx = particlesCanvas.getContext('2d');
+let particles = [];
 
-        window.gsap.from('.hero-copy > *, .envelope-hint, .gold-button--hero', {
-            y: 22,
-            opacity: 0,
-            duration: 0.85,
-            stagger: 0.11,
-            delay: 0.18,
-            ease: 'power3.out'
-        });
+function resizeParticlesCanvas() {
+    particlesCanvas.width = window.innerWidth;
+    particlesCanvas.height = window.innerHeight;
+}
 
-        window.gsap.to('.envelope-stage__halo', {
-            scale: 1.12,
-            opacity: 0.74,
-            duration: 2.5,
-            repeat: -1,
-            yoyo: true,
-            ease: 'sine.inOut'
-        });
-
-        window.gsap.to('.envelope-stage__rings', {
-            rotation: 1,
-            scale: 1.025,
-            duration: 4.8,
-            repeat: -1,
-            yoyo: true,
-            ease: 'sine.inOut'
-        });
+class Particle {
+    constructor(type) {
+        this.type = type; // 'rose' or 'sparkle'
+        this.reset();
+        this.y = Math.random() * particlesCanvas.height; // Start at random Y initially
     }
 
-    function createSparkles() {
-        if (!elements.sparkleField) {
-            return;
-        }
-
-        const count = window.innerWidth < 600 ? 22 : 38;
-        const fragment = document.createDocumentFragment();
-
-        for (let index = 0; index < count; index += 1) {
-            const sparkle = document.createElement('span');
-            sparkle.className = 'sparkle';
-            sparkle.style.left = `${Math.random() * 100}%`;
-            sparkle.style.top = `${Math.random() * 100}%`;
-            sparkle.style.setProperty('--sparkle-size', `${Math.round(3 + Math.random() * 8)}px`);
-            fragment.appendChild(sparkle);
-        }
-
-        elements.sparkleField.appendChild(fragment);
-        const sparkles = elements.sparkleField.querySelectorAll('.sparkle');
-
-        if (!hasGSAP || prefersReducedMotion) {
-            sparkles.forEach((sparkle, index) => {
-                sparkle.style.opacity = index % 3 === 0 ? '0.65' : '0.28';
-                sparkle.style.transform = 'rotate(45deg) scale(0.75)';
-            });
-            return;
-        }
-
-        sparkles.forEach((sparkle, index) => {
-            window.gsap.to(sparkle, {
-                opacity: 0.2 + Math.random() * 0.8,
-                scale: 0.6 + Math.random() * 0.9,
-                rotation: 45 + Math.random() * 90,
-                duration: 1.15 + Math.random() * 2.2,
-                delay: Math.random() * 2.5 + index * 0.035,
-                repeat: -1,
-                yoyo: true,
-                ease: 'sine.inOut'
-            });
-        });
-    }
-
-    function createFallingPetals() {
-        if (!elements.petalField) {
-            return;
-        }
-
-        const count = window.innerWidth < 600 ? 13 : 22;
-        const fragment = document.createDocumentFragment();
-
-        for (let index = 0; index < count; index += 1) {
-            const petal = document.createElement('span');
-            petal.className = 'petal';
-            petal.style.setProperty('--left', `${Math.random() * 100}%`);
-            petal.style.setProperty('--petal-width', `${7 + Math.random() * 8}px`);
-            petal.style.setProperty('--petal-height', `${10 + Math.random() * 12}px`);
-            petal.style.setProperty('--petal-opacity', `${0.27 + Math.random() * 0.43}`);
-            petal.style.setProperty('--rotation', `${Math.random() * 360}deg`);
-            fragment.appendChild(petal);
-        }
-
-        elements.petalField.appendChild(fragment);
-        const petals = elements.petalField.querySelectorAll('.petal');
-
-        if (!hasGSAP || prefersReducedMotion) {
-            petals.forEach((petal) => {
-                petal.style.display = 'none';
-            });
-            return;
-        }
-
-        petals.forEach((petal, index) => {
-            const drift = (Math.random() - 0.5) * 230;
-            const duration = 8 + Math.random() * 9;
-            window.gsap.fromTo(petal,
-                {
-                    y: `${-12 - Math.random() * 10}vh`,
-                    x: 0,
-                    rotation: Number.parseFloat(petal.style.getPropertyValue('--rotation')) || 0
-                },
-                {
-                    y: `${window.innerHeight + 140}px`,
-                    x: drift,
-                    rotation: `+=${180 + Math.random() * 360}`,
-                    duration,
-                    delay: Math.random() * 8 + index * 0.2,
-                    repeat: -1,
-                    ease: 'none',
-                    onRepeat() {
-                        window.gsap.set(petal, {
-                            x: 0,
-                            y: `${-12 - Math.random() * 15}vh`
-                        });
-                    }
-                }
-            );
-        });
-    }
-
-    function createHeartShape() {
-        const shape = new window.THREE.Shape();
-        shape.moveTo(0, -0.22);
-        shape.bezierCurveTo(-0.53, -0.72, -0.95, -0.08, 0, 0.74);
-        shape.bezierCurveTo(0.95, -0.08, 0.53, -0.72, 0, -0.22);
-        return shape;
-    }
-
-    function createThreeEnvelope() {
-        if (!elements.envelopeCanvas) {
-            return null;
-        }
-
-        if (!hasThree) {
-            document.documentElement.classList.add('no-webgl');
-            if (elements.envelopeFallback) {
-                elements.envelopeFallback.setAttribute('aria-hidden', 'false');
-            }
-            return null;
-        }
-
-        try {
-            const THREE = window.THREE;
-            const host = elements.envelopeCanvas;
-            const scene = new THREE.Scene();
-            const camera = new THREE.PerspectiveCamera(32, 1, 0.1, 100);
-            const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, powerPreference: 'high-performance' });
-            const envelope = new THREE.Group();
-            const flapPivot = new THREE.Group();
-            const insertCard = new THREE.Group();
-            const pointer = { x: 0, y: 0 };
-
-            renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-            renderer.setClearColor(0x000000, 0);
-            renderer.shadowMap.enabled = true;
-            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-            host.appendChild(renderer.domElement);
-
-            camera.position.set(0, 0.1, 8.7);
-            camera.lookAt(0, 0, 0);
-
-            scene.add(new THREE.HemisphereLight(0xfff9eb, 0xa77c51, 2.4));
-
-            const keyLight = new THREE.DirectionalLight(0xfff4d3, 3.7);
-            keyLight.position.set(-4, 6, 7);
-            keyLight.castShadow = true;
-            scene.add(keyLight);
-
-            const rimLight = new THREE.PointLight(0xd9aa58, 2.3, 12);
-            rimLight.position.set(4, -1, 4);
-            scene.add(rimLight);
-
-            const paperMaterial = new THREE.MeshPhysicalMaterial({
-                color: 0xfffdf8,
-                roughness: 0.26,
-                metalness: 0.02,
-                clearcoat: 0.45,
-                clearcoatRoughness: 0.2,
-                side: THREE.DoubleSide
-            });
-            const innerMaterial = new THREE.MeshPhysicalMaterial({
-                color: 0xf7edda,
-                roughness: 0.41,
-                metalness: 0.01,
-                side: THREE.DoubleSide
-            });
-            const goldMaterial = new THREE.MeshPhysicalMaterial({
-                color: 0xc79a50,
-                roughness: 0.2,
-                metalness: 0.72,
-                clearcoat: 0.5,
-                side: THREE.DoubleSide
-            });
-            const cardMaterial = new THREE.MeshPhysicalMaterial({
-                color: 0xfffcf4,
-                roughness: 0.3,
-                metalness: 0.01,
-                clearcoat: 0.25,
-                side: THREE.DoubleSide
-            });
-
-            const bodyGeometry = new THREE.BoxGeometry(4.8, 2.86, 0.15);
-            const body = new THREE.Mesh(bodyGeometry, paperMaterial);
-            body.castShadow = true;
-            body.receiveShadow = true;
-            envelope.add(body);
-
-            const insideGeometry = new THREE.PlaneGeometry(4.48, 2.56);
-            const inside = new THREE.Mesh(insideGeometry, innerMaterial);
-            inside.position.set(0, 0.02, -0.09);
-            envelope.add(inside);
-
-            const edgeGeometry = new THREE.EdgesGeometry(bodyGeometry);
-            const edgeLines = new THREE.LineSegments(
-                edgeGeometry,
-                new THREE.LineBasicMaterial({ color: 0xc79a50, transparent: true, opacity: 0.53 })
-            );
-            envelope.add(edgeLines);
-
-            const flapShape = new THREE.Shape();
-            flapShape.moveTo(-2.38, 0);
-            flapShape.lineTo(2.38, 0);
-            flapShape.lineTo(0, -2.3);
-            flapShape.lineTo(-2.38, 0);
-            const flap = new THREE.Mesh(new THREE.ShapeGeometry(flapShape), paperMaterial);
-            flap.position.z = 0.19;
-            flapPivot.position.set(0, 1.43, 0.05);
-            flapPivot.add(flap);
-            envelope.add(flapPivot);
-
-            const flapEdge = new THREE.LineLoop(
-                new THREE.BufferGeometry().setFromPoints([
-                    new THREE.Vector3(-2.38, 0, 0.012),
-                    new THREE.Vector3(2.38, 0, 0.012),
-                    new THREE.Vector3(0, -2.3, 0.012)
-                ]),
-                new THREE.LineBasicMaterial({ color: 0xc79a50, transparent: true, opacity: 0.44 })
-            );
-            flap.add(flapEdge);
-
-            const diagonalLines = new THREE.LineSegments(
-                new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute([
-                    -2.39, -1.42, 0.11, 0, 0.08, 0.11,
-                    2.39, -1.42, 0.11, 0, 0.08, 0.11
-                ], 3)),
-                new THREE.LineBasicMaterial({ color: 0xc79a50, transparent: true, opacity: 0.55 })
-            );
-            envelope.add(diagonalLines);
-
-            const seal = new THREE.Mesh(new THREE.CircleGeometry(0.42, 48), goldMaterial);
-            seal.position.set(0, -0.02, 0.29);
-            envelope.add(seal);
-
-            const sealRing = new THREE.Mesh(
-                new THREE.RingGeometry(0.32, 0.37, 48),
-                new THREE.MeshBasicMaterial({ color: 0xffe4a9, transparent: true, opacity: 0.85, side: THREE.DoubleSide })
-            );
-            sealRing.position.set(0, -0.02, 0.3);
-            envelope.add(sealRing);
-
-            const heart = new THREE.Mesh(new THREE.ShapeGeometry(createHeartShape()), new THREE.MeshBasicMaterial({ color: 0xfff0c4, side: THREE.DoubleSide }));
-            heart.scale.set(0.25, 0.25, 0.25);
-            heart.position.set(0, -0.14, 0.31);
-            envelope.add(heart);
-
-            const cardBody = new THREE.Mesh(new THREE.BoxGeometry(3.56, 2.16, 0.055), cardMaterial);
-            cardBody.castShadow = true;
-            cardBody.position.set(0, -0.08, -0.02);
-            insertCard.add(cardBody);
-
-            const cardBorder = new THREE.LineSegments(
-                new THREE.EdgesGeometry(new THREE.BoxGeometry(3.56, 2.16, 0.055)),
-                new THREE.LineBasicMaterial({ color: 0xc79a50, transparent: true, opacity: 0.52 })
-            );
-            cardBorder.position.copy(cardBody.position);
-            insertCard.add(cardBorder);
-
-            const miniGoldLine = new THREE.Mesh(
-                new THREE.PlaneGeometry(1.42, 0.025),
-                new THREE.MeshBasicMaterial({ color: 0xc79a50, side: THREE.DoubleSide })
-            );
-            miniGoldLine.position.set(0, 0.32, 0.04);
-            insertCard.add(miniGoldLine);
-
-            const miniHeart = new THREE.Mesh(new THREE.ShapeGeometry(createHeartShape()), new THREE.MeshBasicMaterial({ color: 0xd9a4a0, side: THREE.DoubleSide }));
-            miniHeart.scale.set(0.13, 0.13, 0.13);
-            miniHeart.position.set(0, 0.03, 0.05);
-            insertCard.add(miniHeart);
-            envelope.add(insertCard);
-
-            const shadowPlane = new THREE.Mesh(
-                new THREE.CircleGeometry(2.3, 64),
-                new THREE.MeshBasicMaterial({ color: 0xa77936, transparent: true, opacity: 0.11, depthWrite: false })
-            );
-            shadowPlane.scale.set(1.55, 0.47, 1);
-            shadowPlane.position.set(0, -1.92, -0.3);
-            envelope.add(shadowPlane);
-
-            envelope.rotation.set(-0.08, 0.03, 0);
-            envelope.position.y = -0.18;
-            scene.add(envelope);
-
-            const particleGeometry = new THREE.BufferGeometry();
-            const particlePositions = [];
-            for (let index = 0; index < 72; index += 1) {
-                particlePositions.push((Math.random() - 0.5) * 6.5, (Math.random() - 0.5) * 4.3, (Math.random() - 0.5) * 1.5);
-            }
-            particleGeometry.setAttribute('position', new THREE.Float32BufferAttribute(particlePositions, 3));
-            const particles = new THREE.Points(
-                particleGeometry,
-                new THREE.PointsMaterial({ color: 0xe2bb6c, size: 0.025, transparent: true, opacity: 0.7, sizeAttenuation: true })
-            );
-            scene.add(particles);
-
-            function resize() {
-                const width = Math.max(host.clientWidth, 1);
-                const height = Math.max(host.clientHeight, 1);
-                renderer.setSize(width, height, false);
-                camera.aspect = width / height;
-                camera.updateProjectionMatrix();
-            }
-
-            function render() {
-                envelope.rotation.y += (pointer.x * 0.12 - envelope.rotation.y) * 0.035;
-                envelope.rotation.x += (-0.08 - pointer.y * 0.05 - envelope.rotation.x) * 0.035;
-                particles.rotation.y += 0.0008;
-                particles.rotation.x = Math.sin(Date.now() * 0.00025) * 0.04;
-                renderer.render(scene, camera);
-                window.requestAnimationFrame(render);
-            }
-
-            function updatePointer(event) {
-                const rect = host.getBoundingClientRect();
-                const point = event.touches ? event.touches[0] : event;
-                pointer.x = clamp(((point.clientX - rect.left) / rect.width) * 2 - 1, -1, 1);
-                pointer.y = clamp(((point.clientY - rect.top) / rect.height) * 2 - 1, -1, 1);
-            }
-
-            host.addEventListener('pointermove', updatePointer, { passive: true });
-            host.addEventListener('pointerleave', () => {
-                pointer.x = 0;
-                pointer.y = 0;
-            });
-            window.addEventListener('resize', resize, { passive: true });
-            resize();
-            render();
-
-            threeScene = {
-                envelope,
-                flapPivot,
-                insertCard,
-                renderer,
-                cardStartY: insertCard.position.y
-            };
-            return threeScene;
-        } catch (error) {
-            console.warn('Three.js could not initialize. The CSS envelope fallback is active.', error);
-            document.documentElement.classList.add('no-webgl');
-            if (elements.envelopeFallback) {
-                elements.envelopeFallback.setAttribute('aria-hidden', 'false');
-            }
-            return null;
+    reset() {
+        this.x = Math.random() * particlesCanvas.width;
+        this.y = -20;
+        this.size = Math.random() * 10 + 5;
+        this.speedY = Math.random() * 1.5 + 0.5;
+        this.speedX = Math.random() * 1 - 0.5;
+        this.rotation = Math.random() * Math.PI * 2;
+        this.rotationSpeed = Math.random() * 0.02 - 0.01;
+        this.opacity = Math.random() * 0.5 + 0.5;
+        
+        if (this.type === 'sparkle') {
+            this.size = Math.random() * 3 + 1;
+            this.twinkleSpeed = Math.random() * 0.05 + 0.02;
+            this.twinklePhase = Math.random() * Math.PI * 2;
         }
     }
 
-    function openInvitation() {
-        if (invitationOpened) {
-            return;
+    update() {
+        this.y += this.speedY;
+        this.x += this.speedX;
+        this.rotation += this.rotationSpeed;
+
+        if (this.type === 'sparkle') {
+            this.twinklePhase += this.twinkleSpeed;
+            this.opacity = 0.3 + Math.abs(Math.sin(this.twinklePhase)) * 0.7;
         }
 
-        invitationOpened = true;
-        elements.body.classList.add('invitation-is-open');
-        elements.openButton.disabled = true;
-        elements.openButton.setAttribute('aria-label', 'تم فتح الدعوة');
-        elements.invitationContent.setAttribute('aria-hidden', 'false');
-        elements.envelopeCanvas.setAttribute('aria-label', 'تم فتح ظرف الدعوة');
+        if (this.y > particlesCanvas.height + 20) {
+            this.reset();
+        }
+    }
 
-        if (hasGSAP && !prefersReducedMotion) {
-            const timeline = window.gsap.timeline();
-            timeline
-                .to(elements.envelopeHint, { opacity: 0, y: -10, duration: 0.28, ease: 'power2.in' })
-                .to(elements.openButton, { opacity: 0, y: 10, duration: 0.25, ease: 'power2.in' }, '<')
-                .to('.envelope-stage__rings', { opacity: 0.18, scale: 1.18, duration: 0.8, ease: 'power2.out' }, '-=0.05');
+    draw() {
+        pCtx.save();
+        pCtx.translate(this.x, this.y);
+        pCtx.rotate(this.rotation);
+        pCtx.globalAlpha = this.opacity;
 
-            if (threeScene) {
-                timeline
-                    .to(threeScene.flapPivot.rotation, { x: -Math.PI * 0.94, duration: 1.25, ease: 'power3.inOut' }, '-=0.38')
-                    .to(threeScene.insertCard.position, { y: 2.38, z: 0.8, duration: 1.55, ease: 'power3.out' }, '-=0.93')
-                    .to(threeScene.insertCard.rotation, { z: -0.035, x: -0.04, duration: 1.35, ease: 'power2.out' }, '<')
-                    .to(threeScene.envelope.rotation, { y: 0.08, z: -0.035, duration: 1.3, ease: 'power2.out' }, '<');
-            } else {
-                timeline.to('.fallback-envelope__flap', { rotationX: -170, duration: 1.1, ease: 'power3.inOut' }, '-=0.32');
-            }
-
-            timeline.to('.invitation-section', { backgroundColor: 'rgba(255, 253, 249, 0.92)', duration: 0.8 }, '-=0.3');
+        if (this.type === 'rose') {
+            // Draw a simple rose petal shape
+            pCtx.fillStyle = `hsl(${340 + Math.random() * 20}, 70%, ${60 + Math.random() * 20}%)`;
+            pCtx.beginPath();
+            pCtx.moveTo(0, -this.size);
+            pCtx.bezierCurveTo(this.size, -this.size, this.size, this.size, 0, this.size);
+            pCtx.bezierCurveTo(-this.size, this.size, -this.size, -this.size, 0, -this.size);
+            pCtx.fill();
         } else {
-            document.documentElement.classList.add('invitation-open-no-motion');
-            if (threeScene) {
-                threeScene.flapPivot.rotation.x = -Math.PI * 0.94;
-                threeScene.insertCard.position.y = 2.38;
-                threeScene.insertCard.position.z = 0.8;
-            }
+            // Draw sparkle
+            pCtx.fillStyle = '#D4AF37';
+            pCtx.shadowBlur = 10;
+            pCtx.shadowColor = '#FFD700';
+            pCtx.beginPath();
+            pCtx.arc(0, 0, this.size, 0, Math.PI * 2);
+            pCtx.fill();
         }
+        
+        pCtx.restore();
+    }
+}
 
-        window.setTimeout(() => {
-            elements.invitationContent.scrollIntoView({ behavior: prefersReducedMotion ? 'auto' : 'smooth', block: 'start' });
-        }, prefersReducedMotion ? 80 : 560);
+function initParticles() {
+    resizeParticlesCanvas();
+    window.addEventListener('resize', resizeParticlesCanvas);
 
-        if (hasGSAP && !prefersReducedMotion) {
-            window.gsap.fromTo('.invitation-card',
-                { y: 90, opacity: 0, rotationX: -8, transformOrigin: '50% 0%' },
-                { y: 0, opacity: 1, rotationX: 0, duration: 1.45, delay: 0.84, ease: 'power4.out' }
-            );
-            window.gsap.fromTo('.section-heading',
-                { y: 35, opacity: 0 },
-                { y: 0, opacity: 1, duration: 0.85, delay: 0.72, ease: 'power3.out' }
-            );
-            window.gsap.fromTo('.invitation-card__inner > *',
-                { y: 18, opacity: 0 },
-                { y: 0, opacity: 1, duration: 0.68, stagger: 0.075, delay: 1.2, ease: 'power2.out' }
-            );
+    // Create 40 roses and 60 sparkles
+    for (let i = 0; i < 40; i++) particles.push(new Particle('rose'));
+    for (let i = 0; i < 60; i++) particles.push(new Particle('sparkle'));
+
+    animateParticles();
+}
+
+function animateParticles() {
+    pCtx.clearRect(0, 0, particlesCanvas.width, particlesCanvas.height);
+    particles.forEach(p => {
+        p.update();
+        p.draw();
+    });
+    requestAnimationFrame(animateParticles);
+}
+
+// ==========================================
+// 3. Fireworks at the bottom
+// ==========================================
+const fwCanvas = document.getElementById('fireworks-canvas');
+const fwCtx = fwCanvas.getContext('2d');
+let fireworks = [];
+let fwParticles = [];
+let fwActive = false;
+
+function resizeFwCanvas() {
+    const section = document.getElementById('fireworks-section');
+    fwCanvas.width = section.clientWidth;
+    fwCanvas.height = section.clientHeight;
+}
+
+class Firework {
+    constructor() {
+        this.x = Math.random() * fwCanvas.width;
+        this.y = fwCanvas.height;
+        this.targetY = Math.random() * (fwCanvas.height * 0.5) + 50;
+        this.speed = Math.random() * 3 + 4;
+        this.angle = Math.atan2(this.targetY - this.y, 0); // Straight up mostly
+        this.hue = Math.random() * 60 + 30; // Gold/Yellow hues
+        this.alive = true;
+    }
+
+    update() {
+        this.y -= this.speed;
+        if (this.y <= this.targetY) {
+            this.explode();
+            this.alive = false;
         }
     }
 
-    function setupEnvelopeInteractions() {
-        elements.openButton.addEventListener('click', openInvitation);
-        elements.envelopeCanvas.addEventListener('click', openInvitation);
-        elements.envelopeCanvas.addEventListener('keydown', (event) => {
-            if (event.key === 'Enter' || event.key === ' ') {
-                event.preventDefault();
-                openInvitation();
+    explode() {
+        const particleCount = 60;
+        for (let i = 0; i < particleCount; i++) {
+            fwParticles.push(new FwParticle(this.x, this.y, this.hue));
+        }
+    }
+
+    draw() {
+        fwCtx.beginPath();
+        fwCtx.arc(this.x, this.y, 2, 0, Math.PI * 2);
+        fwCtx.fillStyle = `hsl(${this.hue}, 100%, 70%)`;
+        fwCtx.fill();
+    }
+}
+
+class FwParticle {
+    constructor(x, y, hue) {
+        this.x = x;
+        this.y = y;
+        this.hue = hue;
+        this.angle = Math.random() * Math.PI * 2;
+        this.speed = Math.random() * 5 + 1;
+        this.friction = 0.95;
+        this.gravity = 0.05;
+        this.opacity = 1;
+        this.decay = Math.random() * 0.015 + 0.005;
+    }
+
+    update() {
+        this.speed *= this.friction;
+        this.x += Math.cos(this.angle) * this.speed;
+        this.y += Math.sin(this.angle) * this.speed + this.gravity;
+        this.opacity -= this.decay;
+    }
+
+    draw() {
+        fwCtx.save();
+        fwCtx.globalAlpha = Math.max(this.opacity, 0);
+        fwCtx.beginPath();
+        fwCtx.arc(this.x, this.y, 1.5, 0, Math.PI * 2);
+        fwCtx.fillStyle = `hsl(${this.hue}, 100%, 60%)`;
+        fwCtx.shadowBlur = 5;
+        fwCtx.shadowColor = `hsl(${this.hue}, 100%, 50%)`;
+        fwCtx.fill();
+        fwCtx.restore();
+    }
+}
+
+function animateFireworks() {
+    if (!fwActive) return;
+    
+    fwCtx.fillStyle = 'rgba(253, 251, 247, 0.2)'; // Trail effect
+    fwCtx.fillRect(0, 0, fwCanvas.width, fwCanvas.height);
+
+    // Launch new fireworks occasionally
+    if (Math.random() < 0.03) {
+        fireworks.push(new Firework());
+    }
+
+    fireworks = fireworks.filter(f => {
+        f.update();
+        f.draw();
+        return f.alive;
+    });
+
+    fwParticles = fwParticles.filter(p => {
+        p.update();
+        p.draw();
+        return p.opacity > 0;
+    });
+
+    requestAnimationFrame(animateFireworks);
+}
+
+// Trigger fireworks when scrolled to the bottom section
+function initFireworksObserver() {
+    resizeFwCanvas();
+    window.addEventListener('resize', resizeFwCanvas);
+
+    const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting && !fwActive) {
+                fwActive = true;
+                animateFireworks();
+            } else if (!entry.isIntersecting && fwActive) {
+                fwActive = false;
             }
         });
-    }
+    }, { threshold: 0.1 });
 
-    function updateCountdown() {
-        const now = Date.now();
-        const distance = WEDDING_DATE - now;
-        const dayElement = document.getElementById('days');
-        const hourElement = document.getElementById('hours');
-        const minuteElement = document.getElementById('minutes');
-        const secondElement = document.getElementById('seconds');
+    observer.observe(document.getElementById('fireworks-section'));
+}
 
-        if (!dayElement || !hourElement || !minuteElement || !secondElement) {
-            return;
-        }
+// ==========================================
+// 4. Countdown Timer
+// ==========================================
+function initCountdown() {
+    // Target: Friday, August 14, 2026 at 8:00 PM
+    const targetDate = new Date('2026-08-14T20:00:00').getTime();
+    
+    const daysEl = document.getElementById('days');
+    const hoursEl = document.getElementById('hours');
+    const minutesEl = document.getElementById('minutes');
+    const secondsEl = document.getElementById('seconds');
 
-        if (distance <= 0) {
-            dayElement.textContent = '00';
-            hourElement.textContent = '00';
-            minuteElement.textContent = '00';
-            secondElement.textContent = '00';
-            if (elements.countdownNote) {
-                elements.countdownNote.textContent = 'ألف مبروك للعروسين — بدأت فرحتنا';
-            }
-            startFireworks();
+    function update() {
+        const now = new Date().getTime();
+        const distance = targetDate - now;
+
+        if (distance < 0) {
+            daysEl.textContent = '00';
+            hoursEl.textContent = '00';
+            minutesEl.textContent = '00';
+            secondsEl.textContent = '00';
             return;
         }
 
         const days = Math.floor(distance / (1000 * 60 * 60 * 24));
-        const hours = Math.floor((distance / (1000 * 60 * 60)) % 24);
-        const minutes = Math.floor((distance / (1000 * 60)) % 60);
-        const seconds = Math.floor((distance / 1000) % 60);
+        const hours = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+        const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
+        const seconds = Math.floor((distance % (1000 * 60)) / 1000);
 
-        dayElement.textContent = String(days).padStart(2, '0');
-        hourElement.textContent = String(hours).padStart(2, '0');
-        minuteElement.textContent = String(minutes).padStart(2, '0');
-        secondElement.textContent = String(seconds).padStart(2, '0');
+        daysEl.textContent = days.toString().padStart(2, '0');
+        hoursEl.textContent = hours.toString().padStart(2, '0');
+        minutesEl.textContent = minutes.toString().padStart(2, '0');
+        secondsEl.textContent = seconds.toString().padStart(2, '0');
     }
 
-    function setupMusic() {
-        if (!elements.musicButton || !elements.musicAudio) {
-            return;
+    update();
+    setInterval(update, 1000);
+}
+
+// ==========================================
+// 5. Music Player
+// ==========================================
+function initMusic() {
+    const audio = document.getElementById('bg-music');
+    const btn = document.getElementById('music-toggle');
+    const playIcon = document.getElementById('play-icon');
+    const pauseIcon = document.getElementById('pause-icon');
+    let isPlaying = false;
+
+    btn.addEventListener('click', () => {
+        if (isPlaying) {
+            audio.pause();
+            playIcon.style.display = 'block';
+            pauseIcon.style.display = 'none';
+            btn.classList.remove('playing');
+        } else {
+            audio.play().catch(e => console.log("Audio play failed:", e));
+            playIcon.style.display = 'none';
+            pauseIcon.style.display = 'block';
+            btn.classList.add('playing');
         }
+        isPlaying = !isPlaying;
+    });
+}
 
-        const setPlayingState = (isPlaying) => {
-            elements.musicButton.classList.toggle('is-playing', isPlaying);
-            elements.musicButton.setAttribute('aria-pressed', String(isPlaying));
-            elements.musicButton.setAttribute('aria-label', isPlaying ? 'إيقاف الأغنية' : 'تشغيل الأغنية');
-        };
-
-        elements.musicButton.addEventListener('click', async () => {
-            if (elements.musicAudio.paused) {
-                try {
-                    await elements.musicAudio.play();
-                    setPlayingState(true);
-                    elements.audioStatus.textContent = 'تعمل الآن: هو حبيبي — أصالة';
-                } catch (error) {
-                    setPlayingState(false);
-                    elements.audioStatus.textContent = 'لم يتم العثور على الملف. أضف assets/asala-howa-habibi.mp3 أو اختر ملفاً بديلاً.';
-                }
-            } else {
-                elements.musicAudio.pause();
-                setPlayingState(false);
-                elements.audioStatus.textContent = 'تم إيقاف الأغنية مؤقتاً';
-            }
-        });
-
-        elements.musicAudio.addEventListener('ended', () => setPlayingState(false));
-        elements.musicAudio.addEventListener('error', () => {
-            elements.audioStatus.textContent = 'أضف ملف MP3 باسم asala-howa-habibi.mp3 داخل مجلد assets';
-        });
-
-        elements.audioFileInput.addEventListener('change', (event) => {
-            const [file] = event.target.files;
-            if (!file) {
-                return;
-            }
-
-            if (selectedAudioUrl) {
-                URL.revokeObjectURL(selectedAudioUrl);
-            }
-
-            selectedAudioUrl = URL.createObjectURL(file);
-            elements.musicAudio.src = selectedAudioUrl;
-            elements.musicAudio.load();
-            elements.audioStatus.textContent = `تم اختيار: ${file.name}`;
-            elements.musicButton.classList.remove('is-playing');
-            elements.musicButton.setAttribute('aria-pressed', 'false');
-        });
-    }
-
-    function startFireworks() {
-        if (fireworksStarted || !elements.fireworksCanvas) {
-            return;
-        }
-
-        fireworksStarted = true;
-        const canvas = elements.fireworksCanvas;
-        const context = canvas.getContext('2d');
-        if (!context) {
-            return;
-        }
-
-        const section = elements.fireworksSection;
-        const rockets = [];
-        const particles = [];
-        const colors = ['#f3d896', '#ffffff', '#e9a7a0', '#c68c43', '#f8e9be', '#dba7c2'];
-        let width = 0;
-        let height = 0;
-        let lastLaunch = 0;
-        let animationFrame = 0;
-
-        function resize() {
-            const ratio = Math.min(window.devicePixelRatio || 1, 2);
-            width = section.clientWidth;
-            height = section.clientHeight;
-            canvas.width = width * ratio;
-            canvas.height = height * ratio;
-            canvas.style.width = `${width}px`;
-            canvas.style.height = `${height}px`;
-            context.setTransform(ratio, 0, 0, ratio, 0, 0);
-        }
-
-        function createRocket() {
-            rockets.push({
-                x: width * (0.12 + Math.random() * 0.76),
-                y: height + 12,
-                targetY: height * (0.16 + Math.random() * 0.44),
-                speed: 5.1 + Math.random() * 2.8,
-                color: colors[Math.floor(Math.random() * colors.length)],
-                trail: []
-            });
-        }
-
-        function explode(rocket) {
-            const amount = 35 + Math.floor(Math.random() * 35);
-            for (let index = 0; index < amount; index += 1) {
-                const angle = (Math.PI * 2 * index) / amount + (Math.random() - 0.5) * 0.25;
-                const speed = 1.2 + Math.random() * 3.2;
-                particles.push({
-                    x: rocket.x,
-                    y: rocket.y,
-                    vx: Math.cos(angle) * speed,
-                    vy: Math.sin(angle) * speed,
-                    gravity: 0.035 + Math.random() * 0.025,
-                    life: 56 + Math.random() * 36,
-                    maxLife: 90,
-                    size: 0.8 + Math.random() * 1.4,
-                    color: rocket.color
-                });
-            }
-        }
-
-        function draw() {
-            context.fillStyle = 'rgba(33, 30, 41, 0.21)';
-            context.fillRect(0, 0, width, height);
-
-            const now = Date.now();
-            if (now - lastLaunch > 710) {
-                createRocket();
-                lastLaunch = now;
-            }
-
-            for (let index = rockets.length - 1; index >= 0; index -= 1) {
-                const rocket = rockets[index];
-                rocket.trail.push({ x: rocket.x, y: rocket.y });
-                if (rocket.trail.length > 7) {
-                    rocket.trail.shift();
-                }
-                rocket.y -= rocket.speed;
-
-                context.beginPath();
-                context.moveTo(rocket.x, rocket.y);
-                context.lineTo(rocket.x, rocket.y + 10);
-                context.strokeStyle = rocket.color;
-                context.globalAlpha = 0.72;
-                context.lineWidth = 1.2;
-                context.stroke();
-                context.globalAlpha = 1;
-
-                if (rocket.y <= rocket.targetY) {
-                    explode(rocket);
-                    rockets.splice(index, 1);
-                }
-            }
-
-            for (let index = particles.length - 1; index >= 0; index -= 1) {
-                const particle = particles[index];
-                particle.x += particle.vx;
-                particle.y += particle.vy;
-                particle.vy += particle.gravity;
-                particle.vx *= 0.988;
-                particle.life -= 1;
-
-                const opacity = Math.max(particle.life / particle.maxLife, 0);
-                context.beginPath();
-                context.arc(particle.x, particle.y, particle.size, 0, Math.PI * 2);
-                context.fillStyle = particle.color;
-                context.globalAlpha = opacity;
-                context.shadowBlur = 8;
-                context.shadowColor = particle.color;
-                context.fill();
-                context.shadowBlur = 0;
-                context.globalAlpha = 1;
-
-                if (particle.life <= 0) {
-                    particles.splice(index, 1);
-                }
-            }
-
-            animationFrame = window.requestAnimationFrame(draw);
-        }
-
-        resize();
-        window.addEventListener('resize', resize, { passive: true });
-        createRocket();
-        draw();
-
-        window.setTimeout(() => {
-            if (animationFrame) {
-                window.cancelAnimationFrame(animationFrame);
-            }
-        }, 120000);
-    }
-
-    function setupPhoto() {
-        if (!elements.photoFrame || !elements.couplePhoto || !elements.photoFileInput) {
-            return;
-        }
-
-        const showLoadedPhoto = () => {
-            if (elements.couplePhoto.naturalWidth > 0) {
-                elements.photoFrame.classList.add('has-photo');
-                elements.photoFrame.classList.remove('photo-missing');
-            }
-        };
-
-        const showPhotoPlaceholder = () => {
-            elements.photoFrame.classList.remove('has-photo');
-            elements.photoFrame.classList.add('photo-missing');
-        };
-
-        elements.couplePhoto.addEventListener('load', showLoadedPhoto);
-        elements.couplePhoto.addEventListener('error', showPhotoPlaceholder);
-        showLoadedPhoto();
-
-        elements.photoFileInput.addEventListener('change', (event) => {
-            const [file] = event.target.files;
-            if (!file) {
-                return;
-            }
-
-            if (selectedPhotoUrl) {
-                URL.revokeObjectURL(selectedPhotoUrl);
-            }
-
-            selectedPhotoUrl = URL.createObjectURL(file);
-            elements.couplePhoto.src = selectedPhotoUrl;
-            elements.photoFrame.classList.add('has-photo');
-            elements.photoStatus.textContent = `تم اختيار الصورة: ${file.name}`;
-        });
-    }
-
-    function setupFireworksObserver() {
-        if (!elements.fireworksSection || !('IntersectionObserver' in window)) {
-            startFireworks();
-            return;
-        }
-
-        const observer = new IntersectionObserver((entries) => {
-            if (entries.some((entry) => entry.isIntersecting)) {
-                startFireworks();
-                observer.disconnect();
-            }
-        }, { threshold: 0.2 });
-        observer.observe(elements.fireworksSection);
-    }
-
-    function initialize() {
-        if (!hasThree) {
-            document.documentElement.classList.add('no-webgl');
-        }
-
-        createThreeEnvelope();
-        setupEnvelopeInteractions();
-        setInitialAnimations();
-        createSparkles();
-        createFallingPetals();
-        setupMusic();
-        setupPhoto();
-        updateCountdown();
-        window.setInterval(updateCountdown, 1000);
-        setupFireworksObserver();
-    }
-
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', initialize, { once: true });
-    } else {
-        initialize();
-    }
-})();
+// ==========================================
+// Initialize Everything
+// ==========================================
+window.addEventListener('DOMContentLoaded', () => {
+    initThreeJS();
+    initParticles();
+    initCountdown();
+    initMusic();
+    initFireworksObserver();
+});
